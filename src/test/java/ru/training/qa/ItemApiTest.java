@@ -1,19 +1,28 @@
 package ru.training.qa;
 
-import io.restassured.http.ContentType;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Test;
-
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import ru.training.qa.api.CreateItemRequest;
+import ru.training.qa.api.ItemResponse;
+import ru.training.qa.api.RegisterRequest;
+import ru.training.qa.client.AuthApi;
+import ru.training.qa.client.ItemsApi;
+import ru.training.qa.data.ItemDataFactory;
+import ru.training.qa.data.UserDataFactory;
 
-import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
-import static org.hamcrest.Matchers.hasKey;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 public class ItemApiTest {
+
+    private final AuthApi authApi = new AuthApi();
+    private final UserDataFactory userDataFactory = new UserDataFactory();
+    private final ItemsApi itemsApi = new ItemsApi();
+    private final ItemDataFactory itemDataFactory = new ItemDataFactory();
 
     private final List<UUID> createdItemIds = new ArrayList<>();
     private String accessToken;
@@ -21,35 +30,23 @@ public class ItemApiTest {
     @AfterEach
     void cleanUp() {
         for (UUID itemId : createdItemIds) {
-            given()
-                    .auth().oauth2(accessToken)
-                    .when()
-                    .delete("/api/v1/items/{id}", itemId)
+            itemsApi.deleteItem(accessToken, itemId)
                     .then()
                     .statusCode(204);
         }
     }
+
     @Test
     void shouldCreateItemWhenUserIsAuthenticated() {
-        String username = UUID.randomUUID().toString();
-        String password = "r18Vb7!a;0o";
+        RegisterRequest user = userDataFactory.validUser();
 
-        given().contentType(ContentType.JSON).body(Map.of(
-                        "username", username,
-                        "password", password
-                )).when().post("/api/v1/auth/register")
+        authApi.register(user.username(), user.password())
                 .then()
                 .statusCode(201)
-                .body("username", equalTo(username) )
+                .body("username", equalTo(user.username()))
                 .body("id", greaterThan(0));
 
-        accessToken = given()
-                .contentType(ContentType.JSON)
-                .body(Map.of(
-                        "username", username,
-                        "password", password
-                )).when()
-                .post("/api/v1/auth/login")
+        accessToken = authApi.loginResponse(user.username(), user.password())
                 .then()
                 .statusCode(200)
                 .body("accessToken", not(blankOrNullString()))
@@ -61,23 +58,19 @@ public class ItemApiTest {
                 .jsonPath()
                 .getString("accessToken");
 
-        UUID itemId = given()
-                .auth().oauth2(accessToken).contentType(ContentType.JSON)
-                .body(Map.of(
-                        "name", "QA keyboard",
-                        "price", 5000,
-                        "statistics", Map.of(
-                                "contacts", 0,
-                                "likes", 0,
-                                "viewCount", 0
-                        )
-                )).when().post("/api/v1/items")
+        CreateItemRequest request = itemDataFactory.validItem();
+
+        ItemResponse createdItem = itemsApi.createItem(accessToken, request)
                 .then()
                 .statusCode(201)
                 .extract()
-                .jsonPath()
-                .getUUID("id");
+                .as(ItemResponse.class);
 
-        createdItemIds.add(itemId);
+        createdItemIds.add(createdItem.id());
+
+        assertNotNull(createdItem.id());
+        assertEquals(request.name(), createdItem.name());
+        assertEquals(request.price(), createdItem.price());
+        assertEquals(request.statistics(), createdItem.statistics());
     }
 }

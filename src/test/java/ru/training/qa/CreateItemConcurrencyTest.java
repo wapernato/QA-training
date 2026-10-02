@@ -1,32 +1,32 @@
 package ru.training.qa;
 
-import io.restassured.http.ContentType;
-import org.junit.jupiter.api.Test;
-
-import java.util.*;
+import java.util.UUID;
 import java.util.concurrent.*;
+import org.junit.jupiter.api.Test;
+import ru.training.qa.api.ItemResponse;
+import ru.training.qa.api.RegisterRequest;
+import ru.training.qa.client.AuthApi;
+import ru.training.qa.client.ItemsApi;
+import ru.training.qa.data.ItemDataFactory;
+import ru.training.qa.data.UserDataFactory;
 
-import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
-import static org.hamcrest.Matchers.greaterThan;
 import static org.junit.jupiter.api.Assertions.*;
 
 class CreateItemConcurrencyTest {
 
-    private String registerAndLogin(String username, String password) {
-        given().contentType(ContentType.JSON).body(Map.of(
-                        "username", username,
-                        "password", password
-                )).when()
-                .post("/api/v1/auth/register")
+    private final AuthApi authApi = new AuthApi();
+    private final UserDataFactory userDataFactory = new UserDataFactory();
+    private final ItemsApi itemsApi = new ItemsApi();
+    private final ItemDataFactory itemDataFactory = new ItemDataFactory();
+
+    private String registerAndLogin() {
+        RegisterRequest user = userDataFactory.validUser();
+        authApi.register(user.username(), user.password())
                 .then()
                 .statusCode(201);
 
-        return given().contentType(ContentType.JSON).body(Map.of(
-                        "username", username,
-                        "password", password
-                )).when()
-                .post("/api/v1/auth/login")
+        return authApi.loginResponse(user.username(), user.password())
                 .then()
                 .body("accessToken", not(blankOrNullString()))
                 .body("tokenType", equalTo("Bearer"))
@@ -38,37 +38,24 @@ class CreateItemConcurrencyTest {
     }
 
     private UUID createItem(String token) {
-        return given().contentType(ContentType.JSON).auth().oauth2(token)
-                .body(Map.of(
-                        "name", "QA keyboard",
-                        "price", 5000,
-                        "statistics", Map.of(
-                                "contacts", 0,
-                                "likes", 0,
-                                "viewCount", 0
-                        )
-                )).when()
-                .post("/api/v1/items")
+        return itemsApi.createItem(token, itemDataFactory.validItem())
                 .then()
                 .statusCode(201)
                 .extract()
-                .jsonPath()
-                .getUUID("id");
+                .as(ItemResponse.class)
+                .id();
     }
 
     private void deleteItem(String token, UUID itemId) {
-        given().contentType(ContentType.JSON)
-                .auth().oauth2(token)
-                .when()
-                .delete("/api/v1/items/{id}", itemId)
+        itemsApi.deleteItem(token, itemId)
                 .then()
                 .statusCode(204);
     }
 
     @Test
-    void ItemConcurrencyTest() throws Exception{
+    void shouldCreateDistinctItemsConcurrently() throws Exception {
 
-        String tokenA = registerAndLogin("artem_" + UUID.randomUUID(), "c8bxxfhL^G");
+        String tokenA = registerAndLogin();
 
         UUID firstItemId = null;
         UUID secondItemId = null;
@@ -94,8 +81,6 @@ class CreateItemConcurrencyTest {
             firstItemId = firstTask.get(10, TimeUnit.SECONDS);
             secondItemId = secondTask.get(10, TimeUnit.SECONDS);
 
-            List<UUID> list = List.of(firstItemId, secondItemId);
-
             UUID finalFirstItemId = firstItemId;
             UUID finalSecondItemId = secondItemId;
             assertAll(
@@ -103,8 +88,7 @@ class CreateItemConcurrencyTest {
                     () -> assertNotNull(finalSecondItemId),
                     () -> assertNotEquals(finalFirstItemId, finalSecondItemId)
             );
-        }
-        finally {
+        } finally {
 
             if (firstItemId != null) {
                 deleteItem(tokenA, firstItemId);

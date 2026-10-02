@@ -1,30 +1,25 @@
 package ru.training.qa;
 
-import io.restassured.http.ContentType;
-import org.junit.jupiter.api.Test;
-
-import java.util.*;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.*;
+import org.junit.jupiter.api.Test;
+import ru.training.qa.api.RegisterRequest;
+import ru.training.qa.client.AuthApi;
+import ru.training.qa.data.UserDataFactory;
 
-import static io.restassured.RestAssured.given;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class RegistrationConcurrencyTest {
 
-    private Integer register(String username, String password) {
-        return given().contentType(ContentType.JSON).body(Map.of(
-                        "username", username,
-                        "password", password
-                )).when()
-                .post("/api/v1/auth/register")
-                .getStatusCode();
-    }
+    private final AuthApi authApi = new AuthApi();
+    private final UserDataFactory userDataFactory = new UserDataFactory();
 
     @Test
     void shouldReturn201And409WhenSameUsernameIsRegisteredConcurrently() throws Exception {
 
-        String username = "artem_" + UUID.randomUUID();
+        RegisterRequest user = userDataFactory.validUser();
 
         CountDownLatch startGate = new CountDownLatch(1); // синхронизатор со счетчиком один
         CountDownLatch readyGate = new CountDownLatch(2); // синхронизатор со счетчиком два
@@ -33,7 +28,7 @@ class RegistrationConcurrencyTest {
             readyGate.countDown(); // задача говорит: «я готова»
             startGate.await(); // задача останавливается и ждёт общего старта
 
-            return register(username, "c83HF@3mFcOB%H");
+            return authApi.register(user.username(), user.password()).getStatusCode();
         }; // задача, которая выполняется в отдельном потоке и может вернуть результат
 
         ExecutorService executor = Executors.newFixedThreadPool(2); // создает менеджер с двумя потоками
@@ -52,8 +47,7 @@ class RegistrationConcurrencyTest {
                     () -> assertEquals(1, Collections.frequency(statuses, 201)), // считает, что в списке statuses количество 201 равняется одному
                     () -> assertEquals(1, Collections.frequency(statuses, 409)) // аналогично за подсчет отвечает именно frequency
             );
-        }
-        finally {
+        } finally {
             executor.shutdownNow(); // executor обязательно должен быть закрытым
         }
     }

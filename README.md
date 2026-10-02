@@ -26,7 +26,15 @@ mvn spring-boot:run
 
 После запуска: Swagger UI — `http://localhost:8080/swagger-ui.html`, OpenAPI — `http://localhost:8080/v3/api-docs`.
 
-Для unit-практики без PostgreSQL: `mvn test`.
+Для проверки компиляции без запуска тестов: `mvn -DskipTests test-compile`.
+
+API-тесты отправляют HTTP-запросы в отдельно запущенное приложение на `http://localhost:8080`. После запуска приложения можно выполнить только API-сценарии:
+
+```bash
+mvn -Dtest=RegistrationApiTest,ItemApiTest,ItemSecurityApiTest,RegistrationConcurrencyTest,CreateItemConcurrencyTest test
+```
+
+Для локальной unit-практики без приложения и PostgreSQL: `mvn -Dtest=ItemValidatorPracticeTest test`. Общий запуск включает Selenium-тесты; `SauceDemoPurchaseUiTest` пока содержит намеренный `fail` и не завершён.
 
 ## Контракт
 
@@ -57,6 +65,16 @@ mvn spring-boot:run
 
 `controller → service → repository → PostgreSQL`. DTO находятся в `api`, JPA-сущности — в `user` и `item`; они не смешаны. Общая HTTP-безопасность живёт в `security`, а не в контроллерах. Схема БД создаётся миграцией Flyway.
 
+### Архитектура API-тестов
+
+- `config/RequestSpecFactory` задаёт общие настройки запросов: адрес приложения и JSON.
+- `client/AuthApi` и `client/ItemsApi` отправляют запросы и возвращают полный `Response`. Статусы и содержимое ответа проверяются в тестах. `AuthApi.login` — вспомогательный метод успешного входа с проверкой `200`; `loginResponse` позволяет проверять полный ответ.
+- `data/UserDataFactory` создаёт пользователя с уникальным username; `ItemDataFactory` предоставляет готовые варианты объявлений через `ItemDataBuilder`.
+- `ItemDataBuilder` позволяет комбинировать имя, цену и статистику. Значения по умолчанию хранятся в builder; фабрика и builder допускают некорректные данные для негативных тестов.
+- Ответ создания десериализуется в `ItemResponse` через `.as(ItemResponse.class)`. В `ItemApiTest` поля сравниваются с запросом, а UUID сохраняется для очистки.
+
+Каждый тест готовит собственные данные. В конкурентной регистрации один пользователь создаётся до запуска потоков и используется в обоих запросах.
+
 ## Что писать самому
 
 Задания и стартовые сценарии находятся в [learning/DAY_01_REST.md](learning/DAY_01_REST.md), [learning/DAY_02_JUNIT.md](learning/DAY_02_JUNIT.md) и [src/test/java](src/test/java). Создавай свои API-тесты в `src/test/java/ru/training/qa/api` — например `RegistrationApiTest`, `ItemsApiTest`, `SecurityApiTest`.
@@ -66,6 +84,7 @@ mvn spring-boot:run
 ## Реализованные учебные сценарии
 
 - регистрация и login с извлечением JWT;
+- повторная регистрация одного username: `409` с проверкой контракта ошибки;
 - создание item авторизованным пользователем и cleanup;
 - запрет удаления чужого item: пользователь B получает `404`, а item пользователя A остаётся доступен владельцу;
 - две одновременные регистрации одного username: один запрос получает `201`, второй — `409`;

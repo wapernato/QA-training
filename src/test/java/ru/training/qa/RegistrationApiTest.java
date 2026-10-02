@@ -1,32 +1,41 @@
 package ru.training.qa;
 
-import static io.restassured.RestAssured.given;
+import org.junit.jupiter.api.Test;
+import ru.training.qa.api.RegisterRequest;
+import ru.training.qa.client.AuthApi;
+import ru.training.qa.data.UserDataFactory;
 
 import static org.hamcrest.Matchers.*;
 
-import java.util.Map;
-import java.util.UUID;
-
-import io.restassured.http.ContentType;
-import org.junit.jupiter.api.Test;
-
 class RegistrationApiTest {
+
+    private final AuthApi authApi = new AuthApi();
+    private final UserDataFactory userDataFactory = new UserDataFactory();
 
     @Test
     void shouldRegister_whenDataIsValid() {
-        String username = UUID.randomUUID().toString();
-        String password = "14f6H2sdf!$";
+        RegisterRequest user = userDataFactory.validUser();
 
-        given()
-                .contentType(ContentType.JSON)
-                .body(Map.of(
-                "username", username,
-                "password", password
-        )).when()
-                .post("/api/v1/auth/register")
+        authApi.register(user.username(), user.password())
                 .then()
                 .statusCode(201)
-                .body("username", equalTo(username));
+                .body("username", equalTo(user.username()));
+    }
 
+    @Test
+    void shouldReturn409WhenUsernameAlreadyExists() {
+        RegisterRequest user = userDataFactory.validUser();
+
+        authApi.register(user.username(), user.password())
+                .then()
+                .statusCode(201)
+                .body("username", equalTo(user.username()));
+
+        authApi.register(user.username(), user.password())
+                .then()
+                .statusCode(409)
+                .body("status", equalTo(409))
+                .body("code", equalTo("CONFLICT"))
+                .body("path", equalTo("/api/v1/auth/register"));
     }
 }

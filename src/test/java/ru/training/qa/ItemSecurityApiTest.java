@@ -1,35 +1,31 @@
 package ru.training.qa;
 
 import io.restassured.http.ContentType;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Test;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.*;
+import org.junit.jupiter.api.Test;
+import ru.training.qa.api.ItemResponse;
+import ru.training.qa.api.RegisterRequest;
+import ru.training.qa.client.AuthApi;
+import ru.training.qa.client.ItemsApi;
+import ru.training.qa.data.ItemDataFactory;
+import ru.training.qa.data.UserDataFactory;
 
-import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
-import static org.hamcrest.Matchers.hasKey;
 
 class ItemSecurityApiTest {
 
-    private String registerAndLogin(String username, String password) {
-        given().contentType(ContentType.JSON).body(Map.of(
-                "username", username,
-                "password", password
-        )).when()
-                .post("/api/v1/auth/register")
+    private final AuthApi authApi = new AuthApi();
+    private final UserDataFactory userDataFactory = new UserDataFactory();
+    private final ItemsApi itemsApi = new ItemsApi();
+    private final ItemDataFactory itemDataFactory = new ItemDataFactory();
+
+    private String registerAndLogin() {
+        RegisterRequest user = userDataFactory.validUser();
+        authApi.register(user.username(), user.password())
                 .then()
                 .statusCode(201);
 
-        return given().contentType(ContentType.JSON).body(Map.of(
-                "username", username,
-                "password", password
-        )).when()
-                .post("/api/v1/auth/login")
+        return authApi.loginResponse(user.username(), user.password())
                 .then()
                 .body("accessToken", not(blankOrNullString()))
                 .body("tokenType", equalTo("Bearer"))
@@ -41,57 +37,37 @@ class ItemSecurityApiTest {
     }
 
     private UUID createItem(String token) {
-        return given().contentType(ContentType.JSON).auth().oauth2(token)
-                .body(Map.of(
-                "name", "QA keyboard",
-                "price", 5000,
-                "statistics", Map.of(
-                        "contacts", 0,
-                        "likes", 0,
-                        "viewCount", 0
-                )
-        )).when()
-                .post("/api/v1/items")
+        return itemsApi.createItem(token, itemDataFactory.validItem())
                 .then()
                 .statusCode(201)
                 .extract()
-                .jsonPath()
-                .getUUID("id");
+                .as(ItemResponse.class)
+                .id();
     }
 
     private void deleteItem(String token, UUID itemId) {
-        given().contentType(ContentType.JSON)
-                .auth().oauth2(token)
-                .when()
-                .delete("/api/v1/items/{id}", itemId)
+        itemsApi.deleteItem(token, itemId)
                 .then()
                 .statusCode(204);
     }
 
     @Test
     void shouldReturn404WhenAnotherUserDeletesItem() {
-        String tokenA = registerAndLogin("artem_" + UUID.randomUUID(), "robzaidaHQD345");
-        String tokenB = registerAndLogin("antony_" + UUID.randomUUID(), "ro1b#zikHQD");
+        String tokenA = registerAndLogin();
+        String tokenB = registerAndLogin();
 
         UUID itemId = createItem(tokenA);
 
         try {
-            given()
-                    .auth()
-                    .oauth2(tokenB)
-                    .when()
-                    .delete("/api/v1/items/{id}", itemId)
+            itemsApi.deleteItem(tokenB, itemId)
                     .then()
                     .statusCode(404);
 
-            given().auth().oauth2(tokenA)
-                    .when()
-                    .get("/api/v1/items/{id}", itemId)
+            itemsApi.getItem(tokenA, itemId)
                     .then()
                     .statusCode(200)
                     .contentType(ContentType.JSON);
-        }
-        finally {
+        } finally {
             deleteItem(tokenA, itemId);
         }
     }
